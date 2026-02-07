@@ -1,86 +1,119 @@
-// 引入请求库（Vercel 环境已预装）
 const fetch = require('node-fetch');
 
-// CORS 跨域配置（必须加，否则前端无法调用）
+// CORS配置
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',        // 允许所有域名访问（生产可限定你的前端域名）
-  'Access-Control-Allow-Methods': 'POST, OPTIONS', // 允许的请求方法
-  'Access-Control-Allow-Headers': 'Content-Type'  // 允许的请求头
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type'
 };
 
-// Vercel Serverless 核心函数
 module.exports = async (req, res) => {
-  // 处理 OPTIONS 预检请求（跨域必处理）
+  // 处理OPTIONS预检
   if (req.method === 'OPTIONS') {
     return res.status(200).set(CORS_HEADERS).end();
   }
 
-  // 只允许 POST 请求
   if (req.method !== 'POST') {
     return res.status(405).set(CORS_HEADERS).json({
       code: 405,
-      message: '仅支持 POST 请求'
+      message: '仅支持POST请求',
+      debug: '请求方法错误'
     });
   }
 
   try {
-    // 1. 获取前端传的用户唯一 ID（会话隔离核心）
+    // 1. 打印请求体（方便调试）
+    console.log('前端传入参数：', req.body);
     const { user_id } = req.body;
     if (!user_id) {
       return res.status(400).set(CORS_HEADERS).json({
         code: 400,
-        message: '用户唯一 ID 不能为空（会话隔离必需）'
+        message: 'user_id不能为空（会话隔离必需）',
+        debug: '前端未传user_id'
       });
     }
 
-    // 2. 读取 Vercel 环境变量（你在 Vercel 配置的密钥）
-    const { COZE_API_KEY, COZE_BOT_ID, COZE_USER_ID, COZE_BASE_URL } = process.env;
-    // 检查环境变量是否完整
-    if (!COZE_API_KEY || !COZE_BOT_ID || !COZE_USER_ID) {
+    // 2. 读取环境变量（打印脱敏日志）
+    const env = {
+      COZE_API_KEY: process.env.COZE_API_KEY ? 'pat-****' : '未配置',
+      COZE_BOT_ID: process.env.COZE_BOT_ID || '未配置',
+      COZE_USER_ID: process.env.COZE_USER_ID || '未配置',
+      COZE_BASE_URL: process.env.COZE_BASE_URL || 'https://api.coze.com/v1'
+    };
+    console.log('环境变量（脱敏）：', env);
+
+    // 检查环境变量
+    if (!process.env.COZE_API_KEY) {
       return res.status(500).set(CORS_HEADERS).json({
         code: 500,
-        message: 'Vercel 环境变量配置不全，请检查 COZE_API_KEY/BOT_ID/USER_ID'
+        message: 'COZE_API_KEY未配置',
+        debug: 'Vercel环境变量中缺少COZE_API_KEY'
+      });
+    }
+    if (!process.env.COZE_BOT_ID) {
+      return res.status(500).set(CORS_HEADERS).json({
+        code: 500,
+        message: 'COZE_BOT_ID未配置',
+        debug: 'Vercel环境变量中缺少COZE_BOT_ID'
+      });
+    }
+    if (!process.env.COZE_USER_ID) {
+      return res.status(500).set(CORS_HEADERS).json({
+        code: 500,
+        message: 'COZE_USER_ID未配置',
+        debug: 'Vercel环境变量中缺少COZE_USER_ID'
       });
     }
 
-    // 3. 调用 Coze 官方 API 生成用户专属 Token（会话隔离核心）
-    const tokenResponse = await fetch(`${COZE_BASE_URL}/auth/token`, {
+    // 3. 调用Coze官方Token接口（核心修复：域名改为api.coze.com）
+    const tokenUrl = `${env.COZE_BASE_URL}/auth/token`;
+    console.log('调用Coze API地址：', tokenUrl);
+    
+    const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COZE_API_KEY}` // 用你的 PAT 鉴权
+        'Authorization': `Bearer ${process.env.COZE_API_KEY}`
       },
       body: JSON.stringify({
-        user_id: user_id,          // 前端传的唯一 ID（会话隔离关键）
-        bot_id: COZE_BOT_ID,       // 你的智能体 ID
-        platform_user_id: COZE_USER_ID, // 你的 Coze 平台用户 ID
-        expire: 3600               // Token 有效期 1 小时（前端会自动刷新）
+        user_id: user_id,          // 前端传的唯一ID（隔离核心）
+        bot_id: process.env.COZE_BOT_ID, // 智能体ID
+        platform_user_id: process.env.COZE_USER_ID, // 你的Coze UID（必填）
+        expire: 3600
       })
     });
 
-    // 4. 解析 Coze 返回的 Token
+    // 4. 打印Coze返回的原始数据
     const tokenData = await tokenResponse.json();
-    if (!tokenData || !tokenData.token) {
-      throw new Error(`Coze API 返回异常：${JSON.stringify(tokenData)}`);
+    console.log('Coze API返回：', tokenData);
+
+    // 检查返回结果
+    if (!tokenResponse.ok) {
+      throw new Error(`Coze API返回错误：${tokenResponse.status} - ${JSON.stringify(tokenData)}`);
+    }
+    if (!tokenData.token) {
+      throw new Error(`Coze API未返回token：${JSON.stringify(tokenData)}`);
     }
 
-    // 5. 返回 Token 给前端
+    // 5. 返回成功结果
     return res.status(200).set(CORS_HEADERS).json({
       code: 200,
-      message: 'Token 生成成功',
+      message: 'Token生成成功',
       data: {
-        token: tokenData.token,    // 用户专属 Token
-        expire: tokenData.expire || 3600 // 有效期
-      }
+        token: tokenData.token,
+        expire: tokenData.expire || 3600
+      },
+      debug: '成功'
     });
 
   } catch (error) {
-    // 错误处理（生产环境可隐藏具体错误）
-    console.error('Token 生成失败：', error);
+    // 详细错误日志（方便排查）
+    console.error('Token生成失败：', error.message);
     return res.status(500).set(CORS_HEADERS).json({
       code: 500,
-      message: 'Token 生成失败，请检查 Coze 密钥或网络',
-      error: process.env.NODE_ENV === 'development' ? error.message : '' // 开发环境显示错误详情
+      message: 'Token生成失败',
+      debug: error.message, // 前端能看到具体错误
+      stack: process.env.NODE_ENV === 'development' ? error.stack : ''
     });
   }
 };
