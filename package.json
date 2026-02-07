@@ -2,9 +2,9 @@
   "name": "coze-token-server",
   "version": "1.0.0",
   "dependencies": {
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0"  // 兼容 Vercel 的 CommonJS 规范
   },
   "engines": {
-    "node": ">=14.x"
+    "node": ">=14.x"        // 指定 Node 版本，避免部署报错
   }
 }
